@@ -15,123 +15,223 @@ void main() {
   });
 }
 
-// [추가] 앱 설정 데이터를 관리하는 클래스
+// ==========================================
+// [Model] 데이터 모델
+// ==========================================
+
 class AppSettings {
   double strokeWidth;
   Color strokeColor;
   bool showGuideText;
 
   AppSettings({
-    this.strokeWidth = 10.0,
+    this.strokeWidth = 15.0, // [수정] 기본값 10.0 -> 15.0 변경
     this.strokeColor = Colors.black,
     this.showGuideText = true,
   });
 }
 
-// 1. 모음 선택 화면 (Stateful로 변경하여 설정 상태 관리)
-class VowelSelectionScreen extends StatefulWidget {
-  const VowelSelectionScreen({super.key});
+// ==========================================
+// [Utils] 유틸리티 클래스
+// ==========================================
 
-  @override
-  State<VowelSelectionScreen> createState() => _VowelSelectionScreenState();
+class HangulGenerator {
+  static List<String> generateList(String vowel) {
+    // 초성 인덱스 (ㄱ ~ ㅎ)
+    final List<int> choIndices = [0, 2, 3, 5, 6, 7, 9, 11, 12, 14, 15, 16, 17, 18];
+    // 모음별 중성 인덱스 매핑
+    final Map<String, int> jungMap = {
+      'ㅏ': 0, 'ㅑ': 2, 'ㅓ': 4, 'ㅕ': 6, 'ㅗ': 8,
+      'ㅛ': 12, 'ㅜ': 13, 'ㅠ': 17, 'ㅡ': 18, 'ㅣ': 20
+    };
+
+    int jungIndex = jungMap[vowel] ?? 0;
+    List<String> result = [];
+
+    for (int cho in choIndices) {
+      // 한글 유니코드 공식: 0xAC00 + (초성 * 588) + (중성 * 28) + 종성(0)
+      int charCode = 0xAC00 + (cho * 588) + (jungIndex * 28);
+      result.add(String.fromCharCode(charCode));
+    }
+    return result;
+  }
 }
 
-class _VowelSelectionScreenState extends State<VowelSelectionScreen> {
-  // 기본 설정값 초기화
-  AppSettings _appSettings = AppSettings();
+// ==========================================
+// [Widgets] 재사용 가능한 위젯들
+// ==========================================
 
-  final List<String> vowels = const [
-    'ㅏ', 'ㅑ', 'ㅓ', 'ㅕ', 'ㅗ',
-    'ㅛ', 'ㅜ', 'ㅠ', 'ㅡ', 'ㅣ'
-  ];
+/// 한글을 보여주거나 따라 쓸 수 있는 박스 위젯
+class HangulBox extends StatelessWidget {
+  final String char;
+  final double size;
+  final bool isTraceable; // 따라쓰기 모드 여부
+  final AppSettings? appSettings;
+  final List<Offset?>? points;
+  final Function(DragStartDetails)? onPanStart;
+  final Function(DragUpdateDetails)? onPanUpdate;
+  final Function(DragEndDetails)? onPanEnd;
 
-  // 설정 다이얼로그 표시 함수
-  void _showSettingsDialog() {
-    showDialog(
-      context: context,
-      builder: (context) {
-        // 다이얼로그 내부 상태 변경을 위해 StatefulBuilder 사용
-        return StatefulBuilder(
-          builder: (context, setStateDialog) {
-            return AlertDialog(
-              title: const Text("설정"),
-              content: SingleChildScrollView(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    // 1. 펜 두께 설정
-                    const Text("1. 펜 두께", style: TextStyle(fontWeight: FontWeight.bold)),
-                    Slider(
-                      value: _appSettings.strokeWidth,
-                      min: 5.0,
-                      max: 25.0, // [수정] 최대 두께를 50 -> 25로 축소
-                      divisions: 4, // [수정] 5, 10, 15, 20, 25 (5단계)
-                      label: _appSettings.strokeWidth.round().toString(),
-                      onChanged: (value) {
-                        setState(() { // 메인 화면 상태 업데이트 (필요시)
-                          _appSettings.strokeWidth = value;
-                        });
-                        setStateDialog(() {}); // 다이얼로그 내부 UI 업데이트
-                      },
-                    ),
-                    const SizedBox(height: 10),
+  const HangulBox({
+    super.key,
+    required this.char,
+    required this.size,
+    this.isTraceable = false,
+    this.appSettings,
+    this.points,
+    this.onPanStart,
+    this.onPanUpdate,
+    this.onPanEnd,
+  });
 
-                    // 2. 펜 색깔 설정
-                    const Text("2. 펜 색깔", style: TextStyle(fontWeight: FontWeight.bold)),
-                    const SizedBox(height: 10),
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                      children: [
-                        _buildColorOption(Colors.black, setStateDialog),
-                        _buildColorOption(Colors.red, setStateDialog),
-                        _buildColorOption(Colors.blue, setStateDialog),
-                        _buildColorOption(Colors.green, setStateDialog),
-                      ],
-                    ),
-                    const SizedBox(height: 20),
+  @override
+  Widget build(BuildContext context) {
+    // 텍스트 색상 결정: 따라쓰기 모드면 설정값(회색 or 투명), 아니면 검정
+    Color textColor;
+    if (isTraceable) {
+      textColor = (appSettings?.showGuideText ?? true)
+          ? Colors.grey.shade300
+          : Colors.transparent;
+    } else {
+      textColor = Colors.black;
+    }
 
-                    // 3. 가이드 글자 보임/숨김 설정
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        const Text("3. 따라쓰기 글자 보이기", style: TextStyle(fontWeight: FontWeight.bold)),
-                        Switch(
-                          value: _appSettings.showGuideText,
-                          onChanged: (value) {
-                            setState(() {
-                              _appSettings.showGuideText = value;
-                            });
-                            setStateDialog(() {});
-                          },
-                        ),
-                      ],
-                    ),
-                  ],
+    return SizedBox(
+      width: size,
+      height: size,
+      child: Container(
+        decoration: BoxDecoration(
+          border: Border.all(color: Colors.grey.shade300, width: 2),
+          borderRadius: BorderRadius.circular(20),
+        ),
+        child: Stack(
+          alignment: Alignment.center,
+          children: [
+            // 1. 글자 표시 (배경)
+            FittedBox(
+              fit: BoxFit.contain,
+              child: Padding(
+                padding: const EdgeInsets.all(20.0),
+                child: Text(
+                  char,
+                  style: TextStyle(
+                    fontSize: 1000, // FittedBox가 조절하므로 큰 값 설정
+                    fontWeight: FontWeight.bold,
+                    color: textColor,
+                    fontFamily: 'NotoSansKR',
+                  ),
                 ),
               ),
-              actions: [
-                TextButton(
-                  onPressed: () => Navigator.pop(context),
-                  child: const Text("확인"),
+            ),
+            // 2. 그리기 영역 (따라쓰기 모드일 때만)
+            if (isTraceable && appSettings != null && points != null)
+              Positioned.fill(
+                child: GestureDetector(
+                  onPanStart: onPanStart,
+                  onPanUpdate: onPanUpdate,
+                  onPanEnd: onPanEnd,
+                  child: RepaintBoundary( // 성능 최적화: 그리기 영역만 다시 그림
+                    child: CustomPaint(
+                      painter: TracingPainter(points!, appSettings!),
+                      size: Size.infinite,
+                    ),
+                  ),
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// 설정 팝업 다이얼로그
+class SettingsDialog extends StatefulWidget {
+  final AppSettings settings;
+  final VoidCallback onSettingsChanged;
+
+  const SettingsDialog({
+    super.key,
+    required this.settings,
+    required this.onSettingsChanged,
+  });
+
+  @override
+  State<SettingsDialog> createState() => _SettingsDialogState();
+}
+
+class _SettingsDialogState extends State<SettingsDialog> {
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text("설정"),
+      content: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // 1. 펜 두께
+            const Text("1. 펜 두께", style: TextStyle(fontWeight: FontWeight.bold)),
+            Slider(
+              value: widget.settings.strokeWidth,
+              min: 5.0,
+              max: 25.0,
+              divisions: 4,
+              label: widget.settings.strokeWidth.round().toString(),
+              onChanged: (value) {
+                setState(() => widget.settings.strokeWidth = value);
+                widget.onSettingsChanged();
+              },
+            ),
+            const SizedBox(height: 10),
+
+            // 2. 펜 색깔
+            const Text("2. 펜 색깔", style: TextStyle(fontWeight: FontWeight.bold)),
+            const SizedBox(height: 10),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+              children: [
+                _buildColorOption(Colors.black),
+                _buildColorOption(Colors.red),
+                _buildColorOption(Colors.blue),
+                _buildColorOption(Colors.green),
+              ],
+            ),
+            const SizedBox(height: 20),
+
+            // 3. 가이드 글자 토글
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                const Text("3. 따라쓰기 글자 보이기",
+                    style: TextStyle(fontWeight: FontWeight.bold)),
+                Switch(
+                  value: widget.settings.showGuideText,
+                  onChanged: (value) {
+                    setState(() => widget.settings.showGuideText = value);
+                    widget.onSettingsChanged();
+                  },
                 ),
               ],
-            );
-          },
-        );
-      },
+            ),
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text("확인"),
+        ),
+      ],
     );
   }
 
-  // 색상 선택 원형 버튼 빌더
-  Widget _buildColorOption(Color color, StateSetter setStateDialog) {
-    bool isSelected = _appSettings.strokeColor == color;
+  Widget _buildColorOption(Color color) {
+    bool isSelected = widget.settings.strokeColor == color;
     return GestureDetector(
       onTap: () {
-        setState(() {
-          _appSettings.strokeColor = color;
-        });
-        setStateDialog(() {});
+        setState(() => widget.settings.strokeColor = color);
+        widget.onSettingsChanged();
       },
       child: Container(
         width: 40,
@@ -153,98 +253,53 @@ class _VowelSelectionScreenState extends State<VowelSelectionScreen> {
       ),
     );
   }
+}
+
+/// 우측 컨트롤 패널 (이전/다음 버튼 등)
+class ControlPanel extends StatelessWidget {
+  final int currentIndex;
+  final int totalCount;
+  final VoidCallback? onPrev;
+  final VoidCallback? onNext;
+
+  const ControlPanel({
+    super.key,
+    required this.currentIndex,
+    required this.totalCount,
+    this.onPrev,
+    this.onNext,
+  });
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: Colors.white,
-      appBar: AppBar(
-        title: const Text('모음 선택', style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
-        backgroundColor: Colors.white,
-        elevation: 0,
-        centerTitle: true,
-        // [추가] 설정 버튼
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.settings, color: Colors.black),
-            onPressed: _showSettingsDialog,
-          ),
-        ],
-      ),
-      body: SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.all(20.0),
-          child: Column(
-            children: [
-              // [삭제] "연습할 모음을 선택해주세요" 텍스트 제거로 공간 확보
-              Expanded(
-                child: LayoutBuilder(
-                  builder: (context, constraints) {
-                    final double horizontalPadding = 60.0;
-                    final double verticalPadding = 20.0;
-                    final double totalVerticalSpacing = 10;
-                    final double availableHeight = constraints.maxHeight - totalVerticalSpacing - (verticalPadding * 2);
-                    final double itemHeight = availableHeight > 0 ? availableHeight / 2 : 50;
-                    final double totalHorizontalSpacing = 10 * 4;
-                    final double itemWidth = (constraints.maxWidth - totalHorizontalSpacing - (horizontalPadding * 2)) / 5;
-                    final double aspectRatio = itemHeight > 0 ? itemWidth / itemHeight : 1.0;
-
-                    return GridView.builder(
-                      physics: const NeverScrollableScrollPhysics(),
-                      padding: EdgeInsets.symmetric(horizontal: horizontalPadding, vertical: verticalPadding),
-                      gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-                        crossAxisCount: 5,
-                        mainAxisSpacing: 10,
-                        crossAxisSpacing: 10,
-                        childAspectRatio: aspectRatio,
-                      ),
-                      itemCount: vowels.length,
-                      itemBuilder: (context, index) {
-                        return GestureDetector(
-                          onTap: () {
-                            Navigator.push(
-                              context,
-                              MaterialPageRoute(
-                                builder: (context) => HangulTracingScreen(
-                                  selectedVowel: vowels[index],
-                                  appSettings: _appSettings, // [변경] 설정값 전달
-                                ),
-                              ),
-                            );
-                          },
-                          child: Container(
-                            decoration: BoxDecoration(
-                              color: Colors.blue.shade50,
-                              borderRadius: BorderRadius.circular(15),
-                              border: Border.all(color: Colors.blue.shade100, width: 2),
-                            ),
-                            alignment: Alignment.center,
-                            padding: EdgeInsets.zero,
-                            child: SizedBox(
-                              width: itemWidth * 0.7,
-                              height: itemHeight * 0.7,
-                              child: FittedBox(
-                                fit: BoxFit.contain,
-                                child: Text(
-                                  vowels[index],
-                                  style: const TextStyle(
-                                    fontWeight: FontWeight.bold,
-                                    color: Colors.blue,
-                                  ),
-                                ),
-                              ),
-                            ),
-                          ),
-                        );
-                      },
-                    );
-                  },
-                ),
-              ),
-            ],
-          ),
+    return Column(
+      mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+      children: [
+        Column(
+          children: const [
+            ViewTitle(text: "순서대로"),
+            ViewTitle(text: "따라 그려보세요"),
+          ],
         ),
-      ),
+        FloatingActionButton(
+          heroTag: 'prev',
+          onPressed: onPrev,
+          backgroundColor: onPrev != null ? Colors.blue : Colors.grey[200],
+          elevation: 0,
+          child: const Icon(Icons.arrow_back, color: Colors.white),
+        ),
+        Text(
+          "${currentIndex + 1} / $totalCount",
+          style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
+        ),
+        FloatingActionButton(
+          heroTag: 'next',
+          onPressed: onNext,
+          backgroundColor: onNext != null ? Colors.blue : Colors.grey[200],
+          elevation: 0,
+          child: const Icon(Icons.arrow_forward, color: Colors.white),
+        ),
+      ],
     );
   }
 }
@@ -265,10 +320,135 @@ class ViewTitle extends StatelessWidget {
   }
 }
 
-// 2. 따라 쓰기 화면
+// ==========================================
+// [Screens] 화면
+// ==========================================
+
+class VowelSelectionScreen extends StatefulWidget {
+  const VowelSelectionScreen({super.key});
+
+  @override
+  State<VowelSelectionScreen> createState() => _VowelSelectionScreenState();
+}
+
+class _VowelSelectionScreenState extends State<VowelSelectionScreen> {
+  final AppSettings _appSettings = AppSettings();
+  final List<String> vowels = const [
+    'ㅏ', 'ㅑ', 'ㅓ', 'ㅕ', 'ㅗ',
+    'ㅛ', 'ㅜ', 'ㅠ', 'ㅡ', 'ㅣ'
+  ];
+
+  void _showSettings() {
+    showDialog(
+      context: context,
+      builder: (context) => SettingsDialog(
+        settings: _appSettings,
+        onSettingsChanged: () => setState(() {}),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: Colors.white,
+      appBar: AppBar(
+        title: const Text('모음 선택',
+            style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
+        backgroundColor: Colors.white,
+        elevation: 0,
+        centerTitle: true,
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.settings, color: Colors.black),
+            onPressed: _showSettings,
+          ),
+        ],
+      ),
+      body: SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.all(20.0),
+          child: LayoutBuilder(
+            builder: (context, constraints) {
+              // 그리드 레이아웃 계산 최적화
+              const int crossAxisCount = 5;
+              const int rows = 2;
+              const double spacing = 10.0;
+              const double horizontalPadding = 60.0;
+              const double verticalPadding = 20.0;
+
+              final double totalHSpacing = spacing * (crossAxisCount - 1);
+              final double availableWidth = constraints.maxWidth - totalHSpacing - (horizontalPadding * 2);
+              final double itemWidth = availableWidth / crossAxisCount;
+
+              final double totalVSpacing = spacing * (rows - 1);
+              final double availableHeight = constraints.maxHeight - totalVSpacing - (verticalPadding * 2);
+              final double itemHeight = availableHeight > 0 ? availableHeight / rows : 50;
+
+              final double aspectRatio = itemHeight > 0 ? itemWidth / itemHeight : 1.0;
+
+              return GridView.builder(
+                physics: const NeverScrollableScrollPhysics(),
+                padding: const EdgeInsets.symmetric(
+                    horizontal: horizontalPadding,
+                    vertical: verticalPadding
+                ),
+                gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                  crossAxisCount: crossAxisCount,
+                  mainAxisSpacing: spacing,
+                  crossAxisSpacing: spacing,
+                  childAspectRatio: aspectRatio,
+                ),
+                itemCount: vowels.length,
+                itemBuilder: (context, index) {
+                  return GestureDetector(
+                    onTap: () {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (context) => HangulTracingScreen(
+                            selectedVowel: vowels[index],
+                            appSettings: _appSettings,
+                          ),
+                        ),
+                      );
+                    },
+                    child: Container(
+                      decoration: BoxDecoration(
+                        color: Colors.blue.shade50,
+                        borderRadius: BorderRadius.circular(15),
+                        border: Border.all(color: Colors.blue.shade100, width: 2),
+                      ),
+                      alignment: Alignment.center,
+                      child: FractionallySizedBox(
+                        widthFactor: 0.7,
+                        heightFactor: 0.7,
+                        child: FittedBox(
+                          fit: BoxFit.contain,
+                          child: Text(
+                            vowels[index],
+                            style: const TextStyle(
+                              fontWeight: FontWeight.bold,
+                              color: Colors.blue,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                  );
+                },
+              );
+            },
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 class HangulTracingScreen extends StatefulWidget {
   final String selectedVowel;
-  final AppSettings appSettings; // [추가] 설정값 받기
+  final AppSettings appSettings;
 
   const HangulTracingScreen({
     super.key,
@@ -288,32 +468,14 @@ class _HangulTracingScreenState extends State<HangulTracingScreen> {
   @override
   void initState() {
     super.initState();
-    characters = generateHangulList(widget.selectedVowel);
+    characters = HangulGenerator.generateList(widget.selectedVowel);
   }
 
-  List<String> generateHangulList(String vowel) {
-    final List<int> choIndices = [0, 2, 3, 5, 6, 7, 9, 11, 12, 14, 15, 16, 17, 18];
-    final Map<String, int> jungMap = {
-      'ㅏ': 0, 'ㅑ': 2, 'ㅓ': 4, 'ㅕ': 6, 'ㅗ': 8,
-      'ㅛ': 12, 'ㅜ': 13, 'ㅠ': 17, 'ㅡ': 18, 'ㅣ': 20
-    };
-    int jungIndex = jungMap[vowel] ?? 0;
-
-    List<String> result = [];
-    for (int cho in choIndices) {
-      int charCode = 0xAC00 + (cho * 588) + (jungIndex * 28);
-      result.add(String.fromCharCode(charCode));
-    }
-    return result;
+  void _clearBoard() {
+    setState(() => points.clear());
   }
 
-  void clearBoard() {
-    setState(() {
-      points.clear();
-    });
-  }
-
-  void nextChar() {
+  void _nextChar() {
     if (currentIndex < characters.length - 1) {
       setState(() {
         currentIndex++;
@@ -322,7 +484,7 @@ class _HangulTracingScreenState extends State<HangulTracingScreen> {
     }
   }
 
-  void prevChar() {
+  void _prevChar() {
     if (currentIndex > 0) {
       setState(() {
         currentIndex--;
@@ -350,7 +512,7 @@ class _HangulTracingScreenState extends State<HangulTracingScreen> {
         actions: [
           IconButton(
             icon: const Icon(Icons.refresh, color: Colors.black),
-            onPressed: clearBoard,
+            onPressed: _clearBoard,
             tooltip: '다시 쓰기',
           ),
         ],
@@ -358,6 +520,7 @@ class _HangulTracingScreenState extends State<HangulTracingScreen> {
       body: SafeArea(
         child: Row(
           children: [
+            // [왼쪽 영역] 본보기 글자 + 따라쓰기 박스
             Expanded(
               flex: 3,
               child: Padding(
@@ -366,6 +529,7 @@ class _HangulTracingScreenState extends State<HangulTracingScreen> {
                     builder: (context, constraints) {
                       final double gap = 20.0;
                       final double availableWidthPerBox = (constraints.maxWidth - gap) / 2;
+                      // 박스 크기 결정 (정사각형 유지)
                       final double size = availableWidthPerBox < constraints.maxHeight
                           ? availableWidthPerBox
                           : constraints.maxHeight;
@@ -373,92 +537,25 @@ class _HangulTracingScreenState extends State<HangulTracingScreen> {
                       return Row(
                         mainAxisAlignment: MainAxisAlignment.center,
                         children: [
-                          // 왼쪽: 본보기 글자 (검은색)
-                          SizedBox(
-                            width: size,
-                            height: size,
-                            child: Container(
-                              decoration: BoxDecoration(
-                                border: Border.all(color: Colors.grey.shade300, width: 2),
-                                borderRadius: BorderRadius.circular(20),
-                              ),
-                              child: Center(
-                                child: FittedBox(
-                                  fit: BoxFit.contain,
-                                  child: Padding(
-                                    padding: const EdgeInsets.all(20.0),
-                                    child: Text(
-                                      characters[currentIndex],
-                                      style: const TextStyle(
-                                        fontSize: 1000,
-                                        fontWeight: FontWeight.bold,
-                                        color: Colors.black,
-                                        fontFamily: 'NotoSansKR',
-                                      ),
-                                    ),
-                                  ),
-                                ),
-                              ),
-                            ),
+                          // 1. 본보기 글자 (검은색, 그리기 불가)
+                          HangulBox(
+                            char: characters[currentIndex],
+                            size: size,
+                            isTraceable: false,
                           ),
 
                           SizedBox(width: gap),
 
-                          // 오른쪽: 따라 쓰기 글자
-                          SizedBox(
-                            width: size,
-                            height: size,
-                            child: Container(
-                              decoration: BoxDecoration(
-                                border: Border.all(color: Colors.grey.shade300, width: 2),
-                                borderRadius: BorderRadius.circular(20),
-                              ),
-                              child: Stack(
-                                children: [
-                                  // 배경 가이드 글자 (설정에 따라 보임/숨김)
-                                  Positioned.fill(
-                                    child: Center(
-                                      child: FittedBox(
-                                        fit: BoxFit.contain,
-                                        child: Padding(
-                                          padding: const EdgeInsets.all(20.0),
-                                          child: Text(
-                                            characters[currentIndex],
-                                            style: TextStyle(
-                                              fontSize: 1000,
-                                              fontWeight: FontWeight.bold,
-                                              // [변경] 설정된 showGuideText 값에 따라 투명도 조절
-                                              color: widget.appSettings.showGuideText
-                                                  ? Colors.grey.shade300
-                                                  : Colors.transparent,
-                                              fontFamily: 'NotoSansKR',
-                                            ),
-                                          ),
-                                        ),
-                                      ),
-                                    ),
-                                  ),
-                                  Positioned.fill(
-                                    child: GestureDetector(
-                                      onPanStart: (details) {
-                                        setState(() => points.add(details.localPosition));
-                                      },
-                                      onPanUpdate: (details) {
-                                        setState(() => points.add(details.localPosition));
-                                      },
-                                      onPanEnd: (details) {
-                                        setState(() => points.add(null));
-                                      },
-                                      child: CustomPaint(
-                                        // [변경] 설정 객체 전달
-                                        painter: TracingPainter(points, widget.appSettings),
-                                        size: Size.infinite,
-                                      ),
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
+                          // 2. 따라쓰기 글자 (설정색, 그리기 가능)
+                          HangulBox(
+                            char: characters[currentIndex],
+                            size: size,
+                            isTraceable: true,
+                            appSettings: widget.appSettings,
+                            points: points,
+                            onPanStart: (d) => setState(() => points.add(d.localPosition)),
+                            onPanUpdate: (d) => setState(() => points.add(d.localPosition)),
+                            onPanEnd: (d) => setState(() => points.add(null)),
                           ),
                         ],
                       );
@@ -467,39 +564,17 @@ class _HangulTracingScreenState extends State<HangulTracingScreen> {
               ),
             ),
 
+            // [오른쪽 영역] 컨트롤 패널
             Expanded(
               flex: 1,
               child: Container(
                 color: Colors.white,
                 padding: const EdgeInsets.symmetric(vertical: 20, horizontal: 10),
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                  children: [
-                    Column(
-                      children: const [
-                        ViewTitle(text: "순서대로"),
-                        ViewTitle(text: "따라 그려보세요"),
-                      ],
-                    ),
-                    FloatingActionButton(
-                      heroTag: 'prev',
-                      onPressed: currentIndex > 0 ? prevChar : null,
-                      backgroundColor: currentIndex > 0 ? Colors.blue : Colors.grey[200],
-                      elevation: 0,
-                      child: const Icon(Icons.arrow_back, color: Colors.white),
-                    ),
-                    Text(
-                      "${currentIndex + 1} / ${characters.length}",
-                      style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
-                    ),
-                    FloatingActionButton(
-                      heroTag: 'next',
-                      onPressed: currentIndex < characters.length - 1 ? nextChar : null,
-                      backgroundColor: currentIndex < characters.length - 1 ? Colors.blue : Colors.grey[200],
-                      elevation: 0,
-                      child: const Icon(Icons.arrow_forward, color: Colors.white),
-                    ),
-                  ],
+                child: ControlPanel(
+                  currentIndex: currentIndex,
+                  totalCount: characters.length,
+                  onPrev: currentIndex > 0 ? _prevChar : null,
+                  onNext: currentIndex < characters.length - 1 ? _nextChar : null,
                 ),
               ),
             ),
@@ -510,18 +585,23 @@ class _HangulTracingScreenState extends State<HangulTracingScreen> {
   }
 }
 
+// ==========================================
+// [Painters] 커스텀 페인터
+// ==========================================
+
 class TracingPainter extends CustomPainter {
   final List<Offset?> points;
-  final AppSettings appSettings; // [추가] 설정값 필드
+  final AppSettings appSettings;
 
   TracingPainter(this.points, this.appSettings);
 
   @override
   void paint(Canvas canvas, Size size) {
-    Paint paint = Paint()
-      ..color = appSettings.strokeColor // [변경] 설정된 색상 사용
+    // Paint 객체 생성 최적화
+    final Paint paint = Paint()
+      ..color = appSettings.strokeColor
       ..strokeCap = StrokeCap.round
-      ..strokeWidth = appSettings.strokeWidth; // [변경] 설정된 두께 사용
+      ..strokeWidth = appSettings.strokeWidth;
 
     for (int i = 0; i < points.length - 1; i++) {
       if (points[i] != null && points[i + 1] != null) {
@@ -531,5 +611,5 @@ class TracingPainter extends CustomPainter {
   }
 
   @override
-  bool shouldRepaint(TracingPainter oldDelegate) => true;
+  bool shouldRepaint(TracingPainter oldDelegate) => true; // 실시간 드로잉이므로 true
 }
